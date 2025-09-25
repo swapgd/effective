@@ -1,40 +1,194 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <style>
-      #chat {
-        border: 1px solid #ccc;
-        height: 250px;
-        overflow-y: auto;
-        padding: 5px;
-        margin-bottom: 10px;
-        font-family: sans-serif;
-        font-size: 14px;
-        background: #fafafa;
-      }
-      .user { color: blue; margin: 5px 0; }
-      .bot { color: green; margin: 5px 0; }
-      #userInput {
-        width: 100%;
-        height: 60px;
-        margin-bottom: 5px;
-        font-size: 14px;
-      }
-      #sendInput {
-        width: 100%;
-        padding: 5px;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="chat"></div>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 400px;
+      min-height: 500px;
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f8f9fa;
+    }
 
-    <label for="tabSelect">Choose a tab:</label>
-    <select id="tabSelect"></select>
+    h1 {
+      font-size: 18px;
+      margin: 0 0 16px 0;
+      color: #2c3e50;
+      text-align: center;
+    }
 
-    <textarea id="userInput" placeholder="Ask about this page..."></textarea>
-    <button id="sendInput">Send</button>
+    #chat {
+      border: 1px solid #e1e5e9;
+      border-radius: 8px;
+      height: 280px;
+      overflow-y: auto;
+      padding: 12px;
+      margin-bottom: 16px;
+      background: white;
+      font-size: 14px;
+      line-height: 1.4;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
 
-    <script src="popup.js"></script>
-  </body>
+    .user {
+      background: #e3f2fd;
+      color: #1565c0;
+      padding: 8px 12px;
+      margin: 8px 0;
+      border-radius: 12px 12px 4px 12px;
+      border-left: 3px solid #2196f3;
+    }
+
+    .bot {
+      background: #f1f8e9;
+      color: #2e7d32;
+      padding: 8px 12px;
+      margin: 8px 0;
+      border-radius: 12px 12px 12px 4px;
+      border-left: 3px solid #4caf50;
+    }
+
+    .bot i {
+      color: #666;
+    }
+
+    .error {
+      background: #ffebee !important;
+      color: #c62828 !important;
+      border-left-color: #f44336 !important;
+    }
+
+    label {
+      display: block;
+      font-weight: 500;
+      color: #555;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+
+    #tabSelect {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      background: white;
+    }
+
+    #tabSelect:focus {
+      outline: none;
+      border-color: #2196f3;
+      box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+    }
+
+    #userInput {
+      width: 100%;
+      min-height: 60px;
+      max-height: 120px;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+
+    #userInput:focus {
+      outline: none;
+      border-color: #2196f3;
+      box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
+    }
+
+    #sendInput {
+      width: 100%;
+      padding: 10px;
+      background: #2196f3;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    #sendInput:hover {
+      background: #1976d2;
+    }
+
+    #sendInput:active {
+      background: #1565c0;
+    }
+
+    #sendInput:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .input-container {
+      position: relative;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+      font-style: italic;
+    }
+
+    /* Custom scrollbar for chat */
+    #chat::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    #chat::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 3px;
+    }
+
+    #chat::-webkit-scrollbar-thumb {
+      background: #c1c1c1;
+      border-radius: 3px;
+    }
+
+    #chat::-webkit-scrollbar-thumb:hover {
+      background: #a8a8a8;
+    }
+
+    .empty-chat {
+      text-align: center;
+      color: #999;
+      font-style: italic;
+      margin-top: 100px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🌐 Tab Chatbot</h1>
+  
+  <label for="tabSelect">Select any tab to analyze:</label>
+  <select id="tabSelect"></select>
+
+  <div id="chat">
+    <div class="empty-chat">Ask me anything about any webpage...</div>
+  </div>
+
+  <div class="input-container">
+    <textarea 
+      id="userInput" 
+      placeholder="e.g., 'What are the main topics on this page?' or 'Summarize the key points'"
+      rows="3"
+    ></textarea>
+    <div class="hint">Works on any website! Press Enter to send</div>
+  </div>
+  
+  <button id="sendInput">Send Message</button>
+
+  <script src="popup.js"></script>
+</body>
 </html>

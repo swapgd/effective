@@ -2,9 +2,21 @@
   "name": "Tab Chatbot",
   "version": "1.0",
   "manifest_version": 3,
-  "permissions": ["tabs", "scripting", "activeTab"],
-  "host_permissions": ["<all_urls>"],
+  "description": "Chat with any webpage content using AI - works on all websites",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_title": "Universal Tab Chatbot"
+  },
+  "background": {
+    "service_worker": "background.js"
   }
 }
