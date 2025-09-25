@@ -1,0 +1,3 @@
+(() => {
+  return document.body.innerText;
+})();

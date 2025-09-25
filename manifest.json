@@ -1,0 +1,10 @@
+{
+  "name": "Tab Chatbot",
+  "version": "1.0",
+  "manifest_version": 3,
+  "permissions": ["tabs", "scripting", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
