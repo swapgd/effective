@@ -1,356 +1,211 @@
 const OPENAI_API_KEY = "";
 let chatHistory = [];
 
+// Simple tab population
 async function populateTabs() {
   try {
-    console.log('=== POPULATE TABS START ===');
-    
-    // Check if Chrome APIs are available
-    if (!chrome || !chrome.tabs) {
-      console.error('Chrome tabs API not available');
-      const select = document.getElementById("tabSelect");
-      if (select) select.innerHTML = '<option value="">Chrome API unavailable</option>';
-      return;
-    }
-    
-    console.log('Chrome API available, querying tabs...');
     const tabs = await chrome.tabs.query({});
-    console.log('Raw tabs result:', tabs);
-    console.log('Number of tabs found:', tabs?.length || 0);
-    
     const select = document.getElementById("tabSelect");
-    if (!select) {
-      console.error('Tab select element not found in DOM!');
-      return;
-    }
+    if (!select) return;
     
-    console.log('Select element found, clearing options...');
     select.innerHTML = "";
-    
-    if (!tabs || tabs.length === 0) {
-      console.warn('No tabs found, adding placeholder');
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = "No tabs available - Try refresh 🔄";
-      select.appendChild(option);
+    if (!tabs?.length) {
+      select.innerHTML = '<option value="">No tabs available</option>';
       return;
     }
     
-    console.log('Processing', tabs.length, 'tabs...');
-    tabs.forEach((tab, index) => {
-      console.log(`Tab ${index}:`, tab.id, tab.title?.slice(0, 30), tab.url?.slice(0, 50));
+    tabs.forEach((tab) => {
       const option = document.createElement("option");
       option.value = tab.id;
-      option.textContent = `${tab.title?.slice(0, 50) || tab.url?.slice(0, 50) || 'Unknown tab'}`;
+      option.textContent = `${tab.title?.slice(0, 50) || tab.url?.slice(0, 50)}`;
       select.appendChild(option);
     });
-    
-    console.log('=== POPULATE TABS SUCCESS ===');
-    
   } catch (error) {
-    console.error('=== POPULATE TABS ERROR ===', error);
-    const select = document.getElementById("tabSelect");
-    if (select) {
-      select.innerHTML = `<option value="">Error: ${error.message}</option>`;
-    }
+    console.error('Tab loading error:', error);
   }
 }
 
-// Universal content extraction that works on any website
-async function extractPageContent(tabId, query = '') {
+// Simple content extraction - just get everything
+async function extractPageContent(tabId) {
   try {
     const results = await chrome.scripting.executeScript({
       target: { tabId: tabId },
-      function: (searchQuery) => {
+      function: () => {
+        // Extract all meaningful content from page
         const content = [];
-        const queryLower = searchQuery.toLowerCase();
         
-        // Extract page metadata
+        // Get page metadata
         const pageInfo = {
           url: window.location.href,
           title: document.title,
           domain: window.location.hostname
         };
         
-        // Universal relevance calculation
-        function calculateRelevance(text, query) {
-          if (!query) return 0;
-          const queryWords = query.split(/\s+/).filter(w => w.length > 2);
-          if (queryWords.length === 0) return 0;
-          
-          let score = 0;
-          for (const word of queryWords) {
-            const regex = new RegExp(word, 'gi');
-            const matches = (text.match(regex) || []).length;
-            score += matches;
-          }
-          return score / queryWords.length;
-        }
-        
-        // 1. Extract all headings (universal)
-        document.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(heading => {
+        // Extract headings
+        document.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((heading, i) => {
           if (heading.textContent?.trim()) {
-            const text = heading.textContent.trim();
             content.push({
               type: 'heading',
-              level: heading.tagName.toLowerCase(),
-              text: text,
-              relevance: calculateRelevance(text.toLowerCase(), queryLower),
-              importance: heading.tagName === 'H1' ? 'high' : 'medium'
+              text: heading.textContent.trim(),
+              level: heading.tagName.toLowerCase()
             });
           }
         });
-
-        // 2. Extract main content areas (universal semantic HTML)
-        document.querySelectorAll('main, [role="main"], .main, .content, #main, #content').forEach(main => {
-          if (main.textContent?.trim()) {
-            const text = main.textContent.trim();
-            content.push({
-              type: 'main-content',
-              text: text.slice(0, 2000),
-              relevance: calculateRelevance(text.toLowerCase(), queryLower),
-              importance: 'high'
-            });
-          }
+        
+        // Extract main content areas
+        const contentSelectors = [
+          'main', '[role="main"]', '.main', '#main',
+          'article', '.article', '.post', '.entry',
+          'section', '.section', '.content', '#content',
+          '.container', '.wrapper', 'aside', '.sidebar'
+        ];
+        
+        contentSelectors.forEach(selector => {
+          document.querySelectorAll(selector).forEach((element, i) => {
+            if (element.textContent?.trim() && element.textContent.length > 50) {
+              content.push({
+                type: selector.replace(/[.#\[\]="']/g, ''),
+                text: element.textContent.trim().slice(0, 1500)
+              });
+            }
+          });
         });
-
-        // 3. Extract articles and posts (universal)
-        document.querySelectorAll('article, .article, .post, .entry, .item').forEach(article => {
-          if (article.textContent?.trim()) {
-            const title = article.querySelector('h1, h2, h3, .title, .headline, .name')?.textContent?.trim() || '';
-            const text = article.textContent.trim();
-            content.push({
-              type: 'article',
-              title: title,
-              text: text.slice(0, 1000),
-              relevance: calculateRelevance(`${title} ${text}`.toLowerCase(), queryLower),
-              importance: 'medium'
-            });
-          }
-        });
-
-        // 4. Extract lists (universal structured data)
-        document.querySelectorAll('ul, ol').forEach(list => {
-          if (list.textContent?.trim() && list.children.length > 1) {
-            const text = list.textContent.trim();
-            const listItems = Array.from(list.children).map(li => li.textContent?.trim()).filter(Boolean);
+        
+        // Extract lists
+        document.querySelectorAll('ul, ol').forEach((list, i) => {
+          if (list.children.length > 1) {
+            const items = Array.from(list.children)
+              .map(li => li.textContent?.trim())
+              .filter(Boolean)
+              .slice(0, 20);
             
-            content.push({
-              type: 'list',
-              text: text.slice(0, 500),
-              items: listItems.slice(0, 15),
-              relevance: calculateRelevance(text.toLowerCase(), queryLower),
-              importance: 'medium'
-            });
+            if (items.length > 0) {
+              content.push({
+                type: 'list',
+                text: list.textContent.trim().slice(0, 1000),
+                items: items
+              });
+            }
           }
         });
-
-        // 5. Extract navigation and sidebar content (universal)
-        document.querySelectorAll('nav, aside, .nav, .sidebar, .menu, .navigation').forEach(element => {
-          if (element.textContent?.trim()) {
-            const text = element.textContent.trim();
-            const title = element.querySelector('h1, h2, h3, .title')?.textContent?.trim() || element.tagName;
-            
-            content.push({
-              type: 'navigation',
-              title: title,
-              text: text.slice(0, 600),
-              relevance: calculateRelevance(text.toLowerCase(), queryLower),
-              importance: 'medium'
-            });
-          }
-        });
-
-        // 6. Extract sections and containers (universal)
-        document.querySelectorAll('section, .section, .block, .card, .container, .box').forEach(section => {
-          if (section.textContent?.trim() && section.textContent.length > 50) {
-            const text = section.textContent.trim();
-            const title = section.querySelector('h1, h2, h3, .title, .header')?.textContent?.trim() || '';
-            
-            content.push({
-              type: 'section',
-              title: title,
-              text: text.slice(0, 800),
-              relevance: calculateRelevance(`${title} ${text}`.toLowerCase(), queryLower),
-              importance: 'medium'
-            });
-          }
-        });
-
-        // 7. Extract tables (universal structured data)
-        document.querySelectorAll('table').forEach(table => {
+        
+        // Extract tables
+        document.querySelectorAll('table').forEach((table, i) => {
           if (table.textContent?.trim()) {
-            const text = table.textContent.trim();
             content.push({
               type: 'table',
-              text: text.slice(0, 800),
-              relevance: calculateRelevance(text.toLowerCase(), queryLower),
-              importance: 'medium'
+              text: table.textContent.trim().slice(0, 1000)
             });
           }
         });
-
-        // 8. Fallback: extract from body if nothing substantial found
+        
+        // If nothing substantial, get body
         if (content.length < 3) {
-          const bodyText = document.body.textContent.trim();
-          if (bodyText) {
-            content.push({
-              type: 'body-fallback',
-              text: bodyText.slice(0, 3000),
-              relevance: calculateRelevance(bodyText.toLowerCase(), queryLower),
-              importance: 'low'
-            });
-          }
+          content.push({
+            type: 'body',
+            text: document.body.textContent.trim().slice(0, 3000)
+          });
         }
-
-        // Sort by relevance and importance
-        content.sort((a, b) => {
-          const aScore = (a.relevance || 0) * 2 + (a.importance === 'high' ? 1 : a.importance === 'medium' ? 0.5 : 0);
-          const bScore = (b.relevance || 0) * 2 + (b.importance === 'high' ? 1 : b.importance === 'medium' ? 0.5 : 0);
-          return bScore - aScore;
-        });
-
-        // Check if we found relevant content
-        const queryWantsList = searchQuery.toLowerCase().includes('list') || 
-                               searchQuery.toLowerCase().includes('show me') ||
-                               searchQuery.toLowerCase().includes('all') ||
-                               searchQuery.toLowerCase().includes('get me') ||
-                               searchQuery.toLowerCase().includes('display');
-        
-        const hasActualList = content.some(item => 
-          item.type === 'list' && item.items && item.items.length > 3 ||
-          (item.text && item.text.split('\n').length > 5) ||
-          (item.type === 'article' && item.text.length > 200)
-        );
-        
-        const hasRelevantContent = queryWantsList ? 
-          hasActualList : 
-          content.some(item => (item.relevance || 0) > 0.5);
         
         return {
           ...pageInfo,
-          content: content.slice(0, 15),
-          contentCount: content.length,
-          hasRelevantContent: hasRelevantContent,
-          queryAnalyzed: queryLower.length > 0,
-          wantsList: queryWantsList,
-          hasActualList: hasActualList
+          content: content.slice(0, 20) // Limit to prevent overwhelming
         };
-      },
-      args: [query]
+      }
     });
 
     return results[0].result;
   } catch (error) {
     console.error('Content extraction failed:', error);
+    return null;
+  }
+}
+
+// Use AI to understand if current page has what user wants
+async function analyzeContentRelevance(userQuery, currentPageData) {
+  try {
+    const messages = [
+      {
+        role: "system",
+        content: `You are an AI that analyzes if a webpage contains what a user is looking for.
+
+Current webpage: ${currentPageData.title}
+URL: ${currentPageData.url}
+Domain: ${currentPageData.domain}
+
+User's query: "${userQuery}"
+
+Analyze the webpage content and determine:
+1. Does this page contain what the user is asking for?
+2. If not, what kind of page/URL should contain this content?
+3. What are 2-3 most likely URLs on this domain that would have the content?
+
+Respond in JSON format:
+{
+  "hasRelevantContent": boolean,
+  "confidence": number (0-1),
+  "reasoning": "brief explanation",
+  "suggestedUrls": ["url1", "url2", "url3"]
+}`
+      },
+      {
+        role: "user",
+        content: `Page content summary:\n${currentPageData.content.map(item => 
+          `${item.type}: ${item.text.slice(0, 200)}${item.items ? '\nItems: ' + item.items.slice(0, 5).join(', ') : ''}`
+        ).join('\n\n')}`
+      }
+    ];
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: messages,
+        max_tokens: 300,
+        temperature: 0.3
+      })
+    });
+
+    const data = await response.json();
+    const aiResponse = data.choices?.[0]?.message?.content;
+    
+    // Parse JSON response
+    try {
+      return JSON.parse(aiResponse);
+    } catch (parseError) {
+      console.error('Failed to parse AI response:', aiResponse);
+      return {
+        hasRelevantContent: false,
+        confidence: 0,
+        reasoning: "AI response parsing failed",
+        suggestedUrls: []
+      };
+    }
+    
+  } catch (error) {
+    console.error('AI analysis failed:', error);
     return {
-      url: 'unknown',
-      title: 'Error',
-      domain: 'unknown',
-      content: [{ type: 'error', text: `Failed to extract content: ${error.message}` }],
       hasRelevantContent: false,
-      contentCount: 0
+      confidence: 0,
+      reasoning: "AI analysis failed",
+      suggestedUrls: []
     };
   }
 }
 
-// Universal URL generation based on common web patterns
-function generatePotentialUrls(query, currentUrl) {
-  const urls = [];
-  const queryLower = query.toLowerCase();
-  const urlObj = new URL(currentUrl);
-  const baseDomain = `${urlObj.protocol}//${urlObj.hostname}`;
-  
-  // Clean query for URL generation
-  const cleanQuery = query.toLowerCase()
-    .replace(/\b(show me|list|display|get me|find|all)\b/gi, '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-]/g, '')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-
-  // Universal common URL patterns
-  if (cleanQuery) {
-    urls.push(
-      `${baseDomain}/${cleanQuery}`,
-      `${baseDomain}/search?q=${encodeURIComponent(query)}`,
-      `${baseDomain}/search?query=${encodeURIComponent(query)}`,
-      `${baseDomain}/find?q=${encodeURIComponent(query)}`,
-      `${baseDomain}/${cleanQuery}s`, // plural
-      `${baseDomain}/category/${cleanQuery}`,
-      `${baseDomain}/topic/${cleanQuery}`,
-      `${baseDomain}/tag/${cleanQuery}`,
-      `${baseDomain}/topics/${cleanQuery}`,
-      `${baseDomain}/categories/${cleanQuery}`,
-      `${baseDomain}/tags/${cleanQuery}`
-    );
-  }
-
-  // Try different search parameter names (common across sites)
-  const searchParams = ['q', 'query', 'search', 's', 'term', 'keyword'];
-  for (const param of searchParams) {
-    urls.push(`${baseDomain}/search?${param}=${encodeURIComponent(query)}`);
-  }
-
-  // Try current page with different query parameters
-  if (urlObj.pathname !== '/') {
-    urls.push(`${baseDomain}${urlObj.pathname}?q=${encodeURIComponent(query)}`);
-  }
-
-  return [...new Set(urls)]; // Remove duplicates
-}
-
-// Universal decision logic for when to fetch content elsewhere
-function shouldFetchElsewhere(query, currentContent, currentUrl) {
-  try {
-    if (!currentContent) return true;
-    
-    const queryLower = query.toLowerCase();
-    
-    // Universal intent keywords that suggest user wants specific content
-    const actionWords = ['show', 'list', 'get', 'find', 'display', 'give me', 'show me'];
-    const hasActionWord = actionWords.some(word => queryLower.includes(word));
-    
-    // If user is asking for something specific but current content is limited
-    if (hasActionWord && (!currentContent.hasRelevantContent || currentContent.contentCount < 5)) {
-      console.log('Action word detected with limited content, will fetch elsewhere');
-      return true;
-    }
-    
-    // If user wants lists but current page doesn't have structured lists
-    if (currentContent.wantsList && !currentContent.hasActualList) {
-      console.log('User wants list but current page lacks structured content');
-      return true;
-    }
-    
-    // If query has multiple specific words but low relevance
-    const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2);
-    if (queryWords.length >= 2 && (!currentContent.hasRelevantContent)) {
-      console.log('Multi-word query with low relevance, will fetch elsewhere');
-      return true;
-    }
-    
-    return false;
-    
-  } catch (error) {
-    console.error('Error deciding whether to fetch elsewhere:', error);
-    return true; // Default to fetching when in doubt
-  }
-}
-
-// Universal content fetching with error handling
-async function fetchContentFromUrl(url) {
+// Fetch content from a URL
+async function fetchFromUrl(url) {
   let tab = null;
   try {
-    console.log('Creating tab for:', url);
-    
     tab = await chrome.tabs.create({ url: url, active: false });
     
+    // Wait for page load
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Tab loading timeout'));
-      }, 8000); // 8 second timeout
+      const timeout = setTimeout(() => reject(new Error('Timeout')), 8000);
       
       const listener = (tabId, changeInfo) => {
         if (tabId === tab.id && changeInfo.status === 'complete') {
@@ -362,100 +217,100 @@ async function fetchContentFromUrl(url) {
       chrome.tabs.onUpdated.addListener(listener);
     });
     
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for render
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for content to render
     
-    const content = await extractPageContent(tab.id, '');
-    
+    const content = await extractPageContent(tab.id);
     await chrome.tabs.remove(tab.id);
     
-    return content || {
-      url: url,
-      title: 'No content',
-      domain: new URL(url).hostname,
-      content: [],
-      hasRelevantContent: false,
-      contentCount: 0
-    };
+    return content;
     
   } catch (error) {
-    console.error('Fetch failed:', error);
     if (tab?.id) {
       try { await chrome.tabs.remove(tab.id); } catch (e) {}
     }
+    console.error('Fetch failed for', url, ':', error);
     return null;
   }
 }
 
-// Main smart fetching logic
-async function smartContentFetch(tabId, query) {
+// Main intelligent content fetching
+async function intelligentContentFetch(tabId, userQuery) {
   try {
+    // Step 1: Get current page content
     const currentTab = await chrome.tabs.get(tabId);
-    const currentContent = await extractPageContent(tabId, query);
+    const currentContent = await extractPageContent(tabId);
     
     if (!currentContent) {
       throw new Error('Failed to extract current page content');
     }
     
-    if (shouldFetchElsewhere(query, currentContent, currentTab.url)) {
-      const potentialUrls = generatePotentialUrls(query, currentTab.url);
-      console.log('Will try URLs:', potentialUrls.slice(0, 3));
+    // Step 2: Use AI to analyze if current page has what user wants
+    const analysis = await analyzeContentRelevance(userQuery, currentContent);
+    
+    console.log('AI Analysis:', analysis);
+    
+    // Step 3: If current page doesn't have it, try to fetch from suggested URLs
+    if (!analysis.hasRelevantContent && analysis.suggestedUrls.length > 0) {
+      console.log('Current page lacks content, trying suggested URLs...');
       
-      for (const url of potentialUrls.slice(0, 3)) {
-        const fetchedContent = await fetchContentFromUrl(url);
-        if (fetchedContent && (fetchedContent.hasRelevantContent || fetchedContent.contentCount > currentContent.contentCount)) {
-          return {
-            ...fetchedContent,
-            fetchedFrom: url,
-            originalPage: currentTab.url,
-            autoFetched: true
-          };
+      for (const suggestedUrl of analysis.suggestedUrls.slice(0, 3)) {
+        try {
+          console.log('Trying:', suggestedUrl);
+          const fetchedContent = await fetchFromUrl(suggestedUrl);
+          
+          if (fetchedContent && fetchedContent.content.length > currentContent.content.length) {
+            console.log('Successfully fetched better content from:', suggestedUrl);
+            return {
+              ...fetchedContent,
+              autoFetched: true,
+              fetchedFrom: suggestedUrl,
+              aiReasoning: analysis.reasoning
+            };
+          }
+        } catch (error) {
+          console.log('Failed to fetch from:', suggestedUrl, error);
+          continue;
         }
       }
     }
     
-    return currentContent;
+    // Step 4: Return current content if no better alternative found
+    return {
+      ...currentContent,
+      aiAnalysis: analysis
+    };
     
   } catch (error) {
-    console.error('Smart fetch error:', error);
+    console.error('Intelligent fetch failed:', error);
     return {
       url: 'error',
       title: 'Error',
-      domain: 'error',
-      content: [{ type: 'error', text: `Error: ${error.message}` }],
-      hasRelevantContent: false,
-      contentCount: 0
+      content: [{ type: 'error', text: error.message }]
     };
   }
 }
 
-// Format content for LLM
-function formatContentForLLM(extractedData, originalQuery) {
-  let formatted = `Website: ${extractedData.domain}\nPage: ${extractedData.title}\nURL: ${extractedData.url}\n`;
+// Format content for final LLM response
+function formatContentForLLM(contentData, userQuery) {
+  let formatted = `Page: ${contentData.title}\nURL: ${contentData.url}\n`;
   
-  if (extractedData.autoFetched) {
-    formatted += `Content auto-fetched from: ${extractedData.fetchedFrom}\n`;
+  if (contentData.autoFetched) {
+    formatted += `Content auto-fetched from: ${contentData.fetchedFrom}\n`;
+    formatted += `AI reasoning: ${contentData.aiReasoning}\n`;
   }
   
-  formatted += `Query: "${originalQuery}"\n\n`;
-
-  extractedData.content.forEach((item, index) => {
-    const relevanceIcon = (item.relevance || 0) > 1 ? "🎯 " : "";
-    
-    switch (item.type) {
-      case 'heading':
-        formatted += `${relevanceIcon}${item.level.toUpperCase()}: ${item.text}\n\n`;
-        break;
-      case 'list':
-        formatted += `${relevanceIcon}LIST:\n${item.items?.map(i => `• ${i}`).join('\n') || item.text}\n\n`;
-        break;
-      case 'article':
-        formatted += `${relevanceIcon}${item.title ? `${item.title}: ` : ''}${item.text}\n\n`;
-        break;
-      default:
-        formatted += `${relevanceIcon}${item.text}\n\n`;
+  formatted += `\nUser query: "${userQuery}"\n\nPage content:\n\n`;
+  
+  contentData.content.forEach((item, i) => {
+    if (item.items) {
+      formatted += `${item.type.toUpperCase()} (${item.items.length} items):\n`;
+      item.items.forEach(listItem => formatted += `• ${listItem}\n`);
+      formatted += '\n';
+    } else {
+      formatted += `${item.type.toUpperCase()}: ${item.text}\n\n`;
     }
   });
-
+  
   return formatted;
 }
 
@@ -468,34 +323,50 @@ document.getElementById("sendInput").addEventListener("click", async () => {
 
   if (!userText) return;
 
+  // Clear welcome message and add user message
   const emptyChat = chatBox.querySelector('.empty-chat');
   if (emptyChat) emptyChat.remove();
-
+  
   chatHistory.push({ role: "user", content: userText });
   chatBox.innerHTML += `<div class="user"><b>You:</b> ${userText}</div>`;
   inputEl.value = "";
 
-  chatBox.innerHTML += `<div class="bot"><b>Bot:</b> <i>Analyzing and searching for: "${userText}"...</i></div>`;
+  // Show loading
+  chatBox.innerHTML += `<div class="bot"><b>Bot:</b> <i>🤖 Understanding your request...</i></div>`;
   chatBox.scrollTop = chatBox.scrollHeight;
 
   try {
-    const extractedData = await smartContentFetch(tabId, userText);
-    const formattedContent = formatContentForLLM(extractedData, userText);
-
+    // Step 1: Intelligent content fetching
+    const contentData = await intelligentContentFetch(tabId, userText);
+    
+    // Update loading message
+    const chatMessages = chatBox.children;
+    const lastMessage = chatMessages[chatMessages.length - 1];
+    
+    if (contentData.autoFetched) {
+      lastMessage.innerHTML = `<b>Bot:</b> <i>✅ Found relevant content, generating response...</i>`;
+    } else {
+      lastMessage.innerHTML = `<b>Bot:</b> <i>📄 Analyzing current page content...</i>`;
+    }
+    
+    // Step 2: Format content for LLM
+    const formattedContent = formatContentForLLM(contentData, userText);
+    
+    // Step 3: Generate final response
     const messages = [
       {
         role: "system",
-        content: `You are a helpful AI assistant analyzing web content. 
+        content: `You are a helpful assistant that answers questions about webpage content.
         
-        ${extractedData.autoFetched ? 
-          `I automatically found and fetched relevant content from ${extractedData.fetchedFrom} for the user's query. Present this content directly.` :
-          `Content is from the current page.`}
+        ${contentData.autoFetched ? 
+          'I found and fetched the relevant content for the user. Present this information as the direct answer to their question.' :
+          'I analyzed the current page content. Answer based on what I found.'}
         
-        Provide detailed, helpful answers based on the extracted content. If presenting lists or structured data, format them clearly.`
+        Be specific, detailed, and helpful. If you found lists or structured data, present them clearly.`
       },
       {
-        role: "system", 
-        content: `Content:\n\n${formattedContent}`
+        role: "system",
+        content: formattedContent
       },
       ...chatHistory
     ];
@@ -509,25 +380,19 @@ document.getElementById("sendInput").addEventListener("click", async () => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: messages,
-        max_tokens: 700,
+        max_tokens: 800,
         temperature: 0.7
       })
     });
 
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
-    }
-
     const data = await response.json();
-    const botReply = data.choices?.[0]?.message?.content || "No response generated.";
+    const botReply = data.choices?.[0]?.message?.content || "I couldn't generate a response.";
     
     chatHistory.push({ role: "assistant", content: botReply });
 
-    const chatMessages = chatBox.children;
-    const lastMessage = chatMessages[chatMessages.length - 1];
+    // Update UI with final response
     lastMessage.innerHTML = `<b>Bot:</b> ${botReply}`;
     lastMessage.className = 'bot';
-    
     chatBox.scrollTop = chatBox.scrollHeight;
 
   } catch (error) {
@@ -547,47 +412,23 @@ document.getElementById("userInput").addEventListener("keypress", (e) => {
   }
 });
 
-// Multiple initialization attempts to ensure tabs load
+// Initialize
 function initializeExtension() {
-  console.log('Initializing extension...');
-  
-  // Try immediate load
   populateTabs();
   
-  // Add refresh button
   const tabSelect = document.getElementById('tabSelect');
-  if (tabSelect && tabSelect.parentNode) {
-    // Remove existing refresh button if present
-    const existingBtn = tabSelect.parentNode.querySelector('button[title="Refresh tabs"]');
-    if (existingBtn) existingBtn.remove();
-    
+  if (tabSelect?.parentNode && !tabSelect.parentNode.querySelector('[title="Refresh tabs"]')) {
     const refreshBtn = document.createElement('button');
     refreshBtn.textContent = '🔄';
-    refreshBtn.style.cssText = 'margin-left:5px;padding:5px 8px;border:1px solid #ddd;border-radius:4px;cursor:pointer;background:white;';
+    refreshBtn.style.cssText = 'margin-left:5px;padding:5px 8px;border:1px solid #ddd;border-radius:4px;cursor:pointer;';
     refreshBtn.title = 'Refresh tabs';
     refreshBtn.onclick = populateTabs;
     tabSelect.parentNode.insertBefore(refreshBtn, tabSelect.nextSibling);
   }
-  
-  // Fallback loads with delays
-  setTimeout(populateTabs, 100);
-  setTimeout(populateTabs, 500);
-  setTimeout(populateTabs, 1000);
 }
 
-// Initialize on DOM ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initializeExtension);
 } else {
-  // DOM already loaded
   initializeExtension();
-}
-
-// Also initialize when popup becomes visible (Chrome extension specific)
-if (typeof chrome !== 'undefined' && chrome.runtime) {
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'popupOpened') {
-      initializeExtension();
-    }
-  });
 }
